@@ -6,10 +6,10 @@ const app = express()
 const port = process.env.PORT || 5000;
 
 // middleware
-app.use(cors())
-// app.use(cors({
-//     origin: 'http://localhost:5173'
-// }));
+// app.use(cors())
+app.use(cors({
+    origin: 'http://localhost:5173'
+}));
 app.use(express.json())
 app.get('/', (req, res) => {
     res.send('Bornomala is running...')
@@ -55,6 +55,33 @@ async function run() {
             const result = await usersCollections.find().toArray()
             res.send(result)
         })
+
+        // Get user by email
+        app.get('/users/:email', async (req, res) => {
+            const email = req.params.email;
+            const filter = { email: email };
+            const result = await usersCollections.findOne(filter)
+            res.send(result)
+        })
+        // update User
+        app.put('/users/:email', async (req, res) => {
+            const email = req.params.email;
+            const filter = { email: email };
+            const updatedinfo = req.body
+
+            const options = {};
+            // Specify the update to set a value for the plot field
+            const updateDoc = {
+                $set: {
+
+                    phone: updatedinfo.phone,
+                    address: updatedinfo.address
+
+                },
+            };
+            // Update the first document that matches the filter
+            const result = await usersCollections.updateOne(filter, updateDoc, options);
+        });
 
         // Get All Categories
         app.get('/categories', async (req, res) => {
@@ -113,7 +140,7 @@ async function run() {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
             const updatedBook = req.body;
-            const options = { upsert: true };
+            // const options = { upsert: true };
             const updateDoc = {
                 $set: {
                     bookName: updatedBook.bookName,
@@ -126,7 +153,7 @@ async function run() {
                     descriptions: updatedBook.descriptions,
                 }
             }
-            const result = await booksCollections.updateOne(filter, updateDoc, options)
+            const result = await booksCollections.updateOne(filter, updateDoc)
             res.send(result)
 
         })
