@@ -6,10 +6,10 @@ const app = express()
 const port = process.env.PORT || 5000;
 
 // middleware
-// app.use(cors())
-app.use(cors({
-    origin: 'http://localhost:5173'
-}));
+app.use(cors())
+// app.use(cors({
+//     origin: 'http://localhost:5173'
+// }));
 app.use(express.json())
 app.get('/', (req, res) => {
     res.send('Bornomala is running...')
@@ -37,6 +37,7 @@ async function run() {
         const publicatonCollections = client.db("BornomalaDB").collection("publications");
         const booksCollections = client.db("BornomalaDB").collection("books");
         const writerCollections = client.db("BornomalaDB").collection("writers");
+        const cartCollections = client.db("BornomalaDB").collection("carts");
 
         // Users Api
         app.post('/users', async (req, res) => {
@@ -184,6 +185,28 @@ async function run() {
             res.send(result)
         })
 
+        // Cart Collection
+
+        app.post('/carts', async (req, res) => {
+            const item = req.body;
+            const result = await cartCollections.insertOne(item)
+            res.send(result)
+        })
+
+        // get all cart
+        app.get('/carts', async (req, res) => {
+            const result = await cartCollections.find().toArray()
+            res.send(result)
+        })
+
+        // get cart by email
+        app.get('/carts/:email', async (req, res) => {
+            const email = req.params.email;
+            const filter = { userEmail: email };
+            console.log(filter); // Log the email before sending the response
+            const result = await cartCollections.find(filter).toArray()
+            res.send(result);
+        });
 
 
 
