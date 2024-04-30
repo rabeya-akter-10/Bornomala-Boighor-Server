@@ -203,10 +203,17 @@ async function run() {
         app.get('/carts/:email', async (req, res) => {
             const email = req.params.email;
             const filter = { userEmail: email };
-            console.log(filter); // Log the email before sending the response
             const result = await cartCollections.find(filter).toArray()
             res.send(result);
         });
+
+        // delete a item from cart
+        app.delete('/carts/:id', async (req, res) => {
+            const id = req.params.id
+            const filter = { _id: new ObjectId(id) }
+            const result = await cartCollections.deleteOne(filter)
+            res.send(result)
+        })
 
 
 
