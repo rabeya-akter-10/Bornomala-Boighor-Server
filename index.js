@@ -3,6 +3,10 @@ const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
 const app = express()
+const SSLCommerzPayment = require('sslcommerz-lts')
+const store_id = `${process.env.STORE_ID}`
+const store_passwd = `${process.env.STORE_PASS}`
+const is_live = false //true for live, false for sandbox
 const port = process.env.PORT || 5000;
 
 // middleware
@@ -64,6 +68,8 @@ async function run() {
             const result = await usersCollections.findOne(filter)
             res.send(result)
         })
+
+
         // update User
         app.put('/users/:email', async (req, res) => {
             const email = req.params.email;
@@ -82,6 +88,11 @@ async function run() {
             };
             // Update the first document that matches the filter
             const result = await usersCollections.updateOne(filter, updateDoc, options);
+            if (result.modifiedCount === 1) {
+                res.status(200).json({ acknowledged: true });
+            } else {
+                res.status(500).json({ acknowledged: false, error: "Failed to update user information." });
+            }
         });
 
         // Get All Categories
@@ -152,6 +163,9 @@ async function run() {
                     writer: updatedBook.writer,
                     publications: updatedBook.publications,
                     descriptions: updatedBook.descriptions,
+                    keywords: updatedBook.keywords,
+                    bookName_en: updatedBook.bookName_en,
+
                 }
             }
             const result = await booksCollections.updateOne(filter, updateDoc)
@@ -214,6 +228,56 @@ async function run() {
             const result = await cartCollections.deleteOne(filter)
             res.send(result)
         })
+
+        app.post('/orders', async (req, res) => {
+            const product = req?.body;
+            const items = product?.items;
+            const client = product?.client;
+            const bookIDs = items.map(item => new ObjectId(item.bookID));
+            const books = await booksCollections.find({ _id: { $in: bookIDs } }).toArray();
+            const selectedItems = items?.map(item => {
+                const matchedBook = books?.find(book => book?._id.equals(item?.bookID));
+                return item
+            });
+            const totalPrice = selectedItems.reduce((total, i) => total + i?.discountedPrice, 0);
+
+            const data = {
+                total_amount: totalPrice + 70,
+                currency: 'BDT',
+                tran_id: Math.random().toString(36).substr(2, 6) + Math.random().toString(36).substr(2, 6).substr(0, 6),
+                success_url: 'https://bornomala-mart.web.app/success-payment',
+                fail_url: 'https://bornomala-mart.web.app/failed-payment',
+                cancel_url: 'https://bornomala-mart.web.app/cancel-payment',
+                shipping_method: 'Courier',
+                product_name: '.',
+                product_category: 'book',
+                product_profile: 'general',
+                cus_name: client.name,
+                cus_email: client.email,
+                cus_add1: client.address.district,
+                cus_phone: client.phone,
+                ship_name: client.name,
+                ship_add1: client.address.division,
+                ship_city: client.address.district,
+                ship_area: client.address.street,
+                ship_postcode: client.address.postCode,
+                ship_country: 'Bangladesh',
+            };
+
+            console.log(data);
+
+            const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
+            sslcz.init(data).then(apiResponse => {
+                let GatewayPageURL = apiResponse.GatewayPageURL;
+                res.send({ url: GatewayPageURL });
+                console.log('Redirecting to: ', GatewayPageURL);
+            }).catch(error => {
+                console.error('Error initiating SSLCommerz payment:', error);
+                res.status(500).send('An error occurred while initiating payment.');
+            });
+            // console.log(data);
+        });
+
 
 
 
