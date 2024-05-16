@@ -42,6 +42,7 @@ async function run() {
         const booksCollections = client.db("BornomalaDB").collection("books");
         const writerCollections = client.db("BornomalaDB").collection("writers");
         const cartCollections = client.db("BornomalaDB").collection("carts");
+        const orderCollections = client.db("BornomalaDB").collection("orders");
 
         // Users Api
         app.post('/users', async (req, res) => {
@@ -230,9 +231,9 @@ async function run() {
         })
 
         app.post('/orders', async (req, res) => {
-            const product = req?.body;
-            const items = product?.items;
-            const client = product?.client;
+            const initialOrder = req?.body;
+            const items = initialOrder?.items;
+            const client = initialOrder?.client;
             const bookIDs = items.map(item => new ObjectId(item.bookID));
             const books = await booksCollections.find({ _id: { $in: bookIDs } }).toArray();
             const selectedItems = items?.map(item => {
@@ -240,16 +241,16 @@ async function run() {
                 return item
             });
             const totalPrice = selectedItems.reduce((total, i) => total + i?.discountedPrice, 0);
-
+            const trans_id = Math.random().toString(36).substr(2, 6) + Math.random().toString(36).substr(2, 6).substr(0, 6)
             const data = {
                 total_amount: totalPrice + 70,
                 currency: 'BDT',
-                tran_id: Math.random().toString(36).substr(2, 6) + Math.random().toString(36).substr(2, 6).substr(0, 6),
-                success_url: 'https://bornomala-mart.web.app/success-payment',
+                tran_id: trans_id,
+                success_url: `https://bornomala-boighor-server.vercel.app/payment/success/${trans_id}`,
                 fail_url: 'https://bornomala-mart.web.app/failed-payment',
                 cancel_url: 'https://bornomala-mart.web.app/cancel-payment',
                 shipping_method: 'Courier',
-                product_name: '.',
+                product_name: 'book',
                 product_category: 'book',
                 product_profile: 'general',
                 cus_name: client.name,
@@ -264,22 +265,74 @@ async function run() {
                 ship_country: 'Bangladesh',
             };
 
-            console.log(data);
+
+            const finalOrder = {
+                client: initialOrder?.client,
+                products: selectedItems,
+                transactionId: data?.tran_id,
+                paymentStatus: false,
+                deliveryCost: initialOrder.deliveryCost
+            }
+
+            const orderInsert = await orderCollections.insertOne(finalOrder)
 
             const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
             sslcz.init(data).then(apiResponse => {
                 let GatewayPageURL = apiResponse.GatewayPageURL;
+
                 res.send({ url: GatewayPageURL });
                 console.log('Redirecting to: ', GatewayPageURL);
             }).catch(error => {
                 console.error('Error initiating SSLCommerz payment:', error);
                 res.status(500).send('An error occurred while initiating payment.');
             });
-            // console.log(data);
+
+
+
         });
 
+        app.post(`/payment/success/:trans_id`, async (req, res) => {
+            const result = await orderCollections.updateOne({ transactionId: req.params.trans_id }, {
+                $set: {
+                    paymentStatus: true,
+                    orderStatus: "processing"
+                }
+            })
+
+            if (result.modifiedCount > 0) {
+                res.redirect(`https://bornomala-mart.web.app/success-payment/${req.params.trans_id}`)
+            }
+
+            const orders = await orderCollections.findOne({ transactionId: req.params.trans_id })
+            const items = orders?.products
+            const clients = orders?.client
+            const userCart = await cartCollections.find({ userEmail: clients.email }).toArray()
+
+            const orderedItems = userCart.filter(cartItem => {
+                return items.some(item => item.bookId === cartItem.bookId);
+            });
+
+            const removeFromCart = orderedItems.map(item => {
+                const del = cartCollections.deleteOne({ _id: new ObjectId(item._id) })
+            });
 
 
+        })
+
+        app.get('/orders', async (req, res) => {
+            const result = await orderCollections.find().toArray();
+            res.send(result);
+        });
+
+        app.get('/orders/:email', async (req, res) => {
+            const email = req.params.email
+            const filter = {
+                'client.email': email
+            }
+            const result = await orderCollections.find(filter).toArray();
+            res.send(result);
+
+        });
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
