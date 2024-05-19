@@ -43,6 +43,7 @@ async function run() {
         const writerCollections = client.db("BornomalaDB").collection("writers");
         const cartCollections = client.db("BornomalaDB").collection("carts");
         const orderCollections = client.db("BornomalaDB").collection("orders");
+        const reviewCollections = client.db("BornomalaDB").collection("reviews");
 
         // Users Api
         app.post('/users', async (req, res) => {
@@ -230,6 +231,8 @@ async function run() {
             res.send(result)
         })
 
+        // Payments ........................
+
         app.post('/orders', async (req, res) => {
             const initialOrder = req?.body;
             const items = initialOrder?.items;
@@ -291,33 +294,96 @@ async function run() {
 
         });
 
-        app.post(`/payment/success/:trans_id`, async (req, res) => {
-            const result = await orderCollections.updateOne({ transactionId: req.params.trans_id }, {
-                $set: {
-                    paymentStatus: true,
-                    orderStatus: "processing"
+        app.post('/payment/success/:trans_id', async (req, res) => {
+            try {
+                const orderCreationDate = new Date();
+
+                // Calculate minimum and maximum estimated delivery dates
+                const minDeliveryDays = 3;
+                const maxDeliveryDays = 7;
+
+                const minEstimatedDeliveryDate = new Date(orderCreationDate);
+                minEstimatedDeliveryDate.setDate(orderCreationDate.getDate() + minDeliveryDays);
+
+                const maxEstimatedDeliveryDate = new Date(orderCreationDate);
+                maxEstimatedDeliveryDate.setDate(orderCreationDate.getDate() + maxDeliveryDays);
+
+                const estimatedDelivery = `${minEstimatedDeliveryDate.toDateString()} - ${maxEstimatedDeliveryDate.toDateString()}`;
+
+                const result = await orderCollections.updateOne({ transactionId: req.params.trans_id }, {
+                    $set: {
+                        paymentStatus: true,
+                        orderStatus: "Processing",
+                        orderCreationDate: orderCreationDate,
+                        estimatedDelivery: estimatedDelivery
+                    }
+                });
+
+                if (result.modifiedCount > 0) {
+                    res.redirect(`https://bornomala-mart.web.app/success-payment/${req.params.trans_id}`);
+                } else {
+                    return res.status(400).send('Order update failed');
                 }
-            })
 
-            if (result.modifiedCount > 0) {
-                res.redirect(`https://bornomala-mart.web.app/success-payment/${req.params.trans_id}`)
+                const order = await orderCollections.findOne({ transactionId: req.params.trans_id });
+                if (!order) {
+                    return res.status(404).send('Order not found');
+                }
+
+                const items = order.products;
+                const client = order.client;
+                const userCart = await cartCollections.find({ userEmail: client.email }).toArray();
+
+                const orderedItems = userCart.filter(cartItem => {
+                    return items.some(item => item.bookId === cartItem.bookId);
+                });
+
+                const removeFromCartPromises = orderedItems.map(item => {
+                    return cartCollections.deleteOne({ _id: new ObjectId(item._id) });
+                });
+
+                await Promise.all(removeFromCartPromises); // Ensure all delete operations complete
+
+                if (items && items.length > 0) {
+                    for (const item of items) {
+                        if (item.bookId) {
+                            console.log(`Fetching and updating bookId: ${item.bookId}`);
+
+                            const book = await booksCollections.findOne({ _id: new ObjectId(item.bookId) });
+                            if (book) {
+                                const newQuantity = (book.quantity || 0) - 1;
+                                const newSold = (book.sold || 0) + 1;
+
+                                const updateResult = await booksCollections.updateOne(
+                                    { _id: new ObjectId(item.bookId) },
+                                    {
+                                        $set: {
+                                            quantity: newQuantity,
+                                            sold: newSold
+                                        }
+                                    }
+                                );
+
+                                if (updateResult.modifiedCount === 0) {
+                                    console.error(`Failed to update book with ID: ${item.bookId}`);
+                                }
+                            } else {
+                                console.error(`Book not found with ID: ${item.bookId}`);
+                            }
+                        } else {
+                            console.error('Item is missing required properties:', item);
+                        }
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error processing payment success:', error);
+                res.status(500).send('Internal Server Error');
             }
-
-            const orders = await orderCollections.findOne({ transactionId: req.params.trans_id })
-            const items = orders?.products
-            const clients = orders?.client
-            const userCart = await cartCollections.find({ userEmail: clients.email }).toArray()
-
-            const orderedItems = userCart.filter(cartItem => {
-                return items.some(item => item.bookId === cartItem.bookId);
-            });
-
-            const removeFromCart = orderedItems.map(item => {
-                const del = cartCollections.deleteOne({ _id: new ObjectId(item._id) })
-            });
+        });
 
 
-        })
+        //Manage Orders............
 
         app.get('/orders', async (req, res) => {
             const result = await orderCollections.find().toArray();
@@ -333,6 +399,66 @@ async function run() {
             res.send(result);
 
         });
+
+        // Manage Reviews
+
+        // post a review
+        const { ObjectId } = require('mongodb');
+
+        // POST endpoint to handle reviews
+        app.post('/reviews', async (req, res) => {
+            const review = req.body;
+            const result = await reviewCollections.insertOne(review);
+            const orderId = review?.orderId;
+            const bookId = review?.bookId;
+
+            const filter = { _id: new ObjectId(orderId) };
+            const order = await orderCollections.findOne(filter);
+
+            // Find the specific product within the order's products array
+            const selectedProduct = order.products.find(product => product.bookId.toString() === bookId);
+            console.log('Selected product:', selectedProduct);
+
+            // Update the specific product to mark that a review has been given
+            const updatedProducts = order.products.map(product => {
+                if (product.bookId.toString() === bookId) {
+                    return { ...product, reviews: true };
+                }
+                return product;
+            });
+
+            // Update the order with the updated products array
+            const updateResult = await orderCollections.updateOne(
+                { _id: new ObjectId(orderId) },
+                { $set: { products: updatedProducts } }
+            );
+
+            res.send(result);
+        });
+
+
+        // get reviews
+        app.get('/reviews', async (req, res) => {
+            const result = await reviewCollections.find().toArray()
+            res.send(result)
+        })
+
+        // get reviews by Email
+        app.get('/reviews/:email', async (req, res) => {
+            const email = req.params.email;
+            const filter = { userEmail: email }
+            const result = await reviewCollections.find(filter).toArray()
+            res.send(result)
+        })
+
+        // get reviews by book id
+        app.get('/reviews/books/:bookId', async (req, res) => {
+            const bookId = req.params.bookId;
+            console.log(id);
+            const filter = { bookId: bookID }
+            const result = await reviewCollections.find(filter).toArray()
+            res.send(result)
+        })
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
