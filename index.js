@@ -274,7 +274,8 @@ async function run() {
                 products: selectedItems,
                 transactionId: data?.tran_id,
                 paymentStatus: false,
-                deliveryCost: initialOrder.deliveryCost
+                deliveryCost: initialOrder.deliveryCost,
+                totalPrice: totalPrice
             }
 
             const orderInsert = await orderCollections.insertOne(finalOrder)
@@ -397,7 +398,16 @@ async function run() {
             }
             const result = await orderCollections.find(filter).toArray();
             res.send(result);
+        });
 
+        // get order by transactionId
+        app.get('/orders/transID/:transactionId', async (req, res) => {
+            const transactionId = req.params.transactionId
+            const filter = {
+                'transactionId': transactionId
+            }
+            const result = await orderCollections.findOne(filter)
+            res.send(result);
         });
 
         // Manage Reviews
