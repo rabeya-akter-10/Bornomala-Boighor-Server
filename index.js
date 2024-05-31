@@ -1,4 +1,5 @@
 const express = require('express');
+// const { ObjectId } = require('mongodb');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
@@ -11,9 +12,7 @@ const port = process.env.PORT || 5000;
 
 // middleware
 app.use(cors())
-// app.use(cors({
-//     origin: 'http://localhost:5173'
-// }));
+
 app.use(express.json())
 app.get('/', (req, res) => {
     res.send('Bornomala is running...')
@@ -44,11 +43,12 @@ async function run() {
         const cartCollections = client.db("BornomalaDB").collection("carts");
         const orderCollections = client.db("BornomalaDB").collection("orders");
         const reviewCollections = client.db("BornomalaDB").collection("reviews");
+        const blogCollection = client.db("BornomalaDB").collection("blogs");
 
         // Users Api
         app.post('/users', async (req, res) => {
-            const user = req.body;
-            const query = { email: user.email }
+            const user = req?.body;
+            const query = { email: user?.email }
             const existingUser = await usersCollections.findOne(query)
             if (existingUser) {
                 return res.send({ message: "user already exist" })
@@ -56,6 +56,21 @@ async function run() {
             const result = await usersCollections.insertOne(user);
             res.send(result)
         })
+
+        // get users 
+        app.get('/userdb', async (req, res) => {
+            const result = await userCollections.find().toArray()
+            res.send(result)
+        })
+
+        app.get('/userdb/:email', async (req, res) => {
+            const email = req.params.email;
+            const filter = { email: email }
+            const result = await userCollections.findOne(filter)
+            res.send(result)
+        })
+
+
 
         // Get All Users
         app.get('/users', async (req, res) => {
@@ -128,11 +143,37 @@ async function run() {
             const result = await booksCollections.insertOne(book)
             res.send(result)
         })
-        // Get a book
-        app.get('/books', async (req, res) => {
+        // Get all book
+        app.get('/all-books', async (req, res) => {
             const result = await booksCollections.find().toArray()
             res.send(result)
         })
+
+        // Get a book with pagination
+        // Server-side code for /books endpoint with pagination
+        app.get('/books', async (req, res) => {
+            const page = parseInt(req.query.page) || 1;
+            const limit = 12;
+
+            try {
+                const skip = (page - 1) * limit;
+                const result = await booksCollections.find().skip(skip).limit(limit).toArray();
+
+                const totalBooks = await booksCollections.countDocuments();
+                const totalPages = Math.ceil(totalBooks / limit);
+
+                res.send({
+                    page,
+                    totalPages,
+                    totalBooks,
+                    books: result
+                });
+            } catch (error) {
+                res.status(500).send({ message: 'Error retrieving books', error });
+            }
+        });
+
+
 
         // Get a book by id
         app.get(`/books/:id`, async (req, res) => {
@@ -144,7 +185,7 @@ async function run() {
         // Get a book by id
         app.delete(`/books/:id`, async (req, res) => {
             const id = req.params.id;
-            console.log(id);
+            // console.log(id);
             const query = { _id: new ObjectId(id) };
             const result = await booksCollections.deleteOne(query);
             res.send(result);
@@ -162,7 +203,7 @@ async function run() {
                     quantity: updatedBook.quantity,
                     discounts: updatedBook.discounts,
                     category: updatedBook.category,
-                    writer: updatedBook.writer,
+                    writerName: updatedBook.writerName,
                     publications: updatedBook.publications,
                     descriptions: updatedBook.descriptions,
                     keywords: updatedBook.keywords,
@@ -175,12 +216,30 @@ async function run() {
 
         })
 
+        // Re-stock books
+        app.patch('/books/restock/:id', async (req, res) => {
+            const id = req.params.id;
+            const restock = req.body;
+            const filter = { _id: new ObjectId(id) };
+
+            const thisBook = await booksCollections.findOne(filter);
+            const updateDoc = {
+                $set: {
+                    quantity: parseInt(thisBook?.quantity) + parseInt(restock?.quantity)
+                },
+            };
+
+            const result = await booksCollections.updateOne(filter, updateDoc)
+            res.send(result)
+
+        })
+
         // Get Populer books
         app.get('/best-seller', async (req, res) => {
             try {
                 const books = await booksCollections.find().toArray();
                 const sortedBooks = books.sort((a, b) => -a?.sold + b?.sold);
-                const topBooks = sortedBooks.slice(0, 6);
+                const topBooks = sortedBooks.slice(0, 12);
                 res.send(topBooks);
             } catch (error) {
                 console.error("Error fetching top books:", error);
@@ -237,16 +296,35 @@ async function run() {
             const initialOrder = req?.body;
             const items = initialOrder?.items;
             const client = initialOrder?.client;
-            const bookIDs = items.map(item => new ObjectId(item.bookID));
+            const bookIDs = items.map(item => new ObjectId(item?.bookId)); // Use 'bookId' instead of 'bookID'
+
+            // Assuming booksCollections is your MongoDB collection
             const books = await booksCollections.find({ _id: { $in: bookIDs } }).toArray();
+
             const selectedItems = items?.map(item => {
-                const matchedBook = books?.find(book => book?._id.equals(item?.bookID));
-                return item
-            });
-            const totalPrice = selectedItems.reduce((total, i) => total + i?.discountedPrice, 0);
+                const matchedBook = books?.find(book => book._id.equals(new ObjectId(item.bookId)));
+                if (matchedBook) {
+                    const discountedPrice = Math.ceil(matchedBook.price - (matchedBook.price * (matchedBook.discounts / 100)));
+                    return {
+                        discountedPrice: discountedPrice,
+                        itemCount: item.itemCount
+                    };
+                } else {
+                    console.error(`Book not found with ID: ${item.bookId}`);
+                    return null;
+                }
+            }).filter(item => item !== null);
+
+
+            const totalPrice = selectedItems.reduce((total, item) => {
+                return total + (item.discountedPrice * item.itemCount);
+            }, 0);
+
+
+
             const trans_id = Math.random().toString(36).substr(2, 6) + Math.random().toString(36).substr(2, 6).substr(0, 6)
             const data = {
-                total_amount: totalPrice + 70,
+                total_amount: totalPrice + initialOrder.deliveryCost,
                 currency: 'BDT',
                 tran_id: trans_id,
                 success_url: `https://bornomala-boighor-server.vercel.app/payment/success/${trans_id}`,
@@ -271,7 +349,7 @@ async function run() {
 
             const finalOrder = {
                 client: initialOrder?.client,
-                products: selectedItems,
+                products: items,
                 transactionId: data?.tran_id,
                 paymentStatus: false,
                 deliveryCost: initialOrder.deliveryCost,
@@ -285,7 +363,7 @@ async function run() {
                 let GatewayPageURL = apiResponse.GatewayPageURL;
 
                 res.send({ url: GatewayPageURL });
-                console.log('Redirecting to: ', GatewayPageURL);
+                // console.log('Redirecting to: ', GatewayPageURL);
             }).catch(error => {
                 console.error('Error initiating SSLCommerz payment:', error);
                 res.status(500).send('An error occurred while initiating payment.');
@@ -294,6 +372,8 @@ async function run() {
 
 
         });
+
+
 
         app.post('/payment/success/:trans_id', async (req, res) => {
             try {
@@ -320,9 +400,7 @@ async function run() {
                     }
                 });
 
-                if (result.modifiedCount > 0) {
-                    res.redirect(`https://bornomala-mart.web.app/success-payment/${req.params.trans_id}`);
-                } else {
+                if (result.modifiedCount === 0) {
                     return res.status(400).send('Order update failed');
                 }
 
@@ -333,28 +411,14 @@ async function run() {
 
                 const items = order.products;
                 const client = order.client;
-                const userCart = await cartCollections.find({ userEmail: client.email }).toArray();
-
-                const orderedItems = userCart.filter(cartItem => {
-                    return items.some(item => item.bookId === cartItem.bookId);
-                });
-
-                const removeFromCartPromises = orderedItems.map(item => {
-                    return cartCollections.deleteOne({ _id: new ObjectId(item._id) });
-                });
-
-                await Promise.all(removeFromCartPromises); // Ensure all delete operations complete
 
                 if (items && items.length > 0) {
                     for (const item of items) {
                         if (item.bookId) {
-                            console.log(`Fetching and updating bookId: ${item.bookId}`);
-
                             const book = await booksCollections.findOne({ _id: new ObjectId(item.bookId) });
                             if (book) {
-                                const newQuantity = (book.quantity || 0) - 1;
-                                const newSold = (book.sold || 0) + 1;
-
+                                const newQuantity = (book.quantity || 0) - item.itemCount;
+                                const newSold = (book.sold || 0) + item.itemCount;
                                 const updateResult = await booksCollections.updateOne(
                                     { _id: new ObjectId(item.bookId) },
                                     {
@@ -377,11 +441,25 @@ async function run() {
                     }
                 }
 
+                // Delete purchased items from the user's cart
+                const purchasedItemIds = items.map(item => item.bookId);
+                await cartCollections.deleteMany({ userEmail: client.email, bookId: { $in: purchasedItemIds } });
+
+                console.log("Order processed successfully.");
+
+                res.redirect(`https://bornomala-mart.web.app/success-payment/${req.params.trans_id}`);
+
             } catch (error) {
                 console.error('Error processing payment success:', error);
                 res.status(500).send('Internal Server Error');
             }
         });
+
+
+
+
+
+
 
 
         //Manage Orders............
@@ -400,6 +478,43 @@ async function run() {
             res.send(result);
         });
 
+        // Get orders by orderStatus
+        app.get('/orders/status/:status', async (req, res) => {
+            const status = req.params.status.toLowerCase();
+            const filter = { $expr: { $eq: [{ $toLower: "$orderStatus" }, status] } };
+            const result = await orderCollections.find(filter).toArray();
+            res.send(result);
+        });
+
+        // Change order Status
+        app.patch('/orders/status/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+            const update = req.body
+            const updateDoc = {
+                $set: {
+                    orderStatus: update?.orderStatus
+                },
+            };
+            const result = await orderCollections.updateOne(filter, updateDoc)
+            res.send(result)
+        })
+
+        // Change order Status delivered
+        app.patch('/orders/setDelivered/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+            const update = req.body;
+            const updateDoc = {
+                $set: {
+                    orderStatus: update?.orderStatus,
+                    deliveredIn: update?.deliveredIn
+                },
+            };
+            const result = await orderCollections.updateOne(filter, updateDoc)
+            res.send(result)
+        })
+
         // get order by transactionId
         app.get('/orders/transID/:transactionId', async (req, res) => {
             const transactionId = req.params.transactionId
@@ -409,6 +524,7 @@ async function run() {
             const result = await orderCollections.findOne(filter)
             res.send(result);
         });
+
 
         // Manage Reviews
 
@@ -427,7 +543,7 @@ async function run() {
 
             // Find the specific product within the order's products array
             const selectedProduct = order.products.find(product => product.bookId.toString() === bookId);
-            console.log('Selected product:', selectedProduct);
+            // console.log('Selected product:', selectedProduct);
 
             // Update the specific product to mark that a review has been given
             const updatedProducts = order.products.map(product => {
@@ -462,11 +578,23 @@ async function run() {
         })
 
         // get reviews by book id
-        app.get('/reviews/books/:bookId', async (req, res) => {
-            const bookId = req.params.bookId;
-            console.log(id);
-            const filter = { bookId: bookID }
+        app.get('/reviews/books/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { bookId: id }
             const result = await reviewCollections.find(filter).toArray()
+            res.send(result)
+        })
+
+        // add blog
+        app.post('/blogs', async (req, res) => {
+            const blog = req.body;
+            result = await blogCollection.insertOne(blog);
+            res.send(result)
+        })
+
+        // Get blogs
+        app.get('/blogs', async (req, res) => {
+            result = await blogCollection.find().toArray()
             res.send(result)
         })
 
