@@ -598,6 +598,83 @@ async function run() {
             res.send(result)
         })
 
+        // Get blogs
+        app.get('/blogs/email/:email', async (req, res) => {
+            const email = req.params.email
+            const filter = {
+                authorEmail: email
+            }
+            result = await blogCollection.find(filter).toArray()
+            res.send(result)
+        })
+
+        // get reviews by book id
+        app.get('/blogs/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+            const result = await blogCollection.findOne(filter)
+            res.send(result)
+        })
+
+        // Edit a blog
+        app.put('/blogs/:id', async (req, res) => {
+            const id = req.params.id;
+            const update = req.body;
+            const filter = { _id: new ObjectId(id) };
+            const updateDocument = {
+                $set: update,
+            };
+            const result = await blogCollection.updateOne(filter, updateDocument)
+            res.send(result)
+        });
+
+        // Delete a Blog
+
+        app.delete('/blogs/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) };
+            const result = await blogCollection.deleteOne(filter);
+            res.send(result)
+        });
+
+        // sells Reports
+
+        app.get('/sales-report', async (req, res) => {
+            const { startDate, endDate } = req.query;
+
+            // Convert the startDate and endDate strings to Date objects
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+
+            console.log(start, end);
+
+            try {
+                const query = {
+                    orderCreationDate: {
+                        $gte: start,
+                        $lte: end
+                    },
+                    paymentStatus: true  // Only consider paid orders
+                };
+
+                const salesItem = await orderCollections.find(query).toArray();
+
+                // Calculate total sales and other summary data if needed
+                const totalSales = salesItem.reduce((acc, order) => acc + order.totalPrice, 0);
+
+                res.send({
+                    totalSales,
+                    salesItem
+                });
+            } catch (error) {
+                console.error("Error fetching sales data:", error);
+                res.status(500).send("An error occurred while fetching sales data.");
+            }
+        });
+
+
+
+
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
