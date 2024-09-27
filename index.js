@@ -182,7 +182,7 @@ async function run() {
             const result = await booksCollections.findOne(query);
             res.send(result);
         });
-        // Get a book by id
+        // Delete a book by id
         app.delete(`/books/:id`, async (req, res) => {
             const id = req.params.id;
             // console.log(id);
@@ -208,6 +208,7 @@ async function run() {
                     descriptions: updatedBook.descriptions,
                     keywords: updatedBook.keywords,
                     bookName_en: updatedBook.bookName_en,
+                    buyingPrice: updatedBook.buyingPrice,
 
                 }
             }
