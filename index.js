@@ -1,5 +1,5 @@
 const express = require('express');
-// const { ObjectId } = require('mongodb');
+const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
@@ -17,6 +17,22 @@ app.use(express.json())
 app.get('/', (req, res) => {
     res.send('Bornomala is running...')
 })
+
+// Verify JWT
+const VerifyJwt = (req, res, next) => {
+    const authorization = req.headers.authorization
+    if (!authorization) {
+        return res.status(401).send({ error: true, message: 'Unauthorized access' });
+    }
+    const token = authorization.split(' ')[1];
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(401).send({ error: true, message: 'Unauthorized access' });
+        }
+        req.decoded = decoded;
+        next()
+    })
+}
 
 // MongoDB Connect
 
@@ -45,6 +61,26 @@ async function run() {
         const reviewCollections = client.db("BornomalaDB").collection("reviews");
         const blogCollection = client.db("BornomalaDB").collection("blogs");
 
+
+        // JWT
+        app.post('/jwt', async (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1h' })
+            res.send({ token })
+        })
+
+        // VerifyAdmin
+        const VerifyAdmin = async (req, res, next) => {
+            const email = req.decoded.email;
+            const query = { email: email }
+            const user = await usersCollections.findOne(query)
+            if (user.role !== "admin") {
+                return res.status(401).send({ error: true, message: 'Unauthorized access' });
+            }
+
+            next()
+        }
+
         // Users Api
         app.post('/users', async (req, res) => {
             const user = req?.body;
@@ -57,29 +93,14 @@ async function run() {
             res.send(result)
         })
 
-        // get users 
-        app.get('/userdb', async (req, res) => {
-            const result = await userCollections.find().toArray()
-            res.send(result)
-        })
-
-        app.get('/userdb/:email', async (req, res) => {
-            const email = req.params.email;
-            const filter = { email: email }
-            const result = await userCollections.findOne(filter)
-            res.send(result)
-        })
-
-
-
         // Get All Users
-        app.get('/users', async (req, res) => {
+        app.get('/users', VerifyJwt, async (req, res) => {
             const result = await usersCollections.find().toArray()
             res.send(result)
         })
 
         // Get user by email
-        app.get('/users/:email', async (req, res) => {
+        app.get('/users/:email', VerifyJwt, async (req, res) => {
             const email = req.params.email;
             const filter = { email: email };
             const result = await usersCollections.findOne(filter)
@@ -88,7 +109,7 @@ async function run() {
 
 
         // update User
-        app.put('/users/:email', async (req, res) => {
+        app.put('/users/:email', VerifyJwt, async (req, res) => {
             const email = req.params.email;
             const filter = { email: email };
             const updatedinfo = req.body
@@ -119,7 +140,7 @@ async function run() {
         })
 
         // Post a categories
-        app.post('/categories', async (req, res) => {
+        app.post('/categories', VerifyJwt, VerifyAdmin, async (req, res) => {
             const category = req.body;
             const result = await categoriesCollections.insertOne(category)
             res.send(result)
@@ -131,14 +152,14 @@ async function run() {
         })
 
         // Post a publications
-        app.post('/publications', async (req, res) => {
+        app.post('/publications', VerifyJwt, VerifyAdmin, async (req, res) => {
             const publication = req.body;
             const result = await publicatonCollections.insertOne(publication)
             res.send(result)
         })
 
         // Post a book
-        app.post('/books', async (req, res) => {
+        app.post('/books', VerifyJwt, VerifyAdmin, async (req, res) => {
             const book = req.body;
             const result = await booksCollections.insertOne(book)
             res.send(result)
@@ -183,7 +204,7 @@ async function run() {
             res.send(result);
         });
         // Delete a book by id
-        app.delete(`/books/:id`, async (req, res) => {
+        app.delete(`/books/:id`, VerifyJwt, VerifyAdmin, async (req, res) => {
             const id = req.params.id;
             // console.log(id);
             const query = { _id: new ObjectId(id) };
@@ -191,7 +212,7 @@ async function run() {
             res.send(result);
         });
         // Update a book
-        app.patch('/books/:id', async (req, res) => {
+        app.patch('/books/:id', VerifyJwt, VerifyAdmin, async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
             const updatedBook = req.body;
@@ -218,7 +239,7 @@ async function run() {
         })
 
         // Re-stock books
-        app.patch('/books/restock/:id', async (req, res) => {
+        app.patch('/books/restock/:id', VerifyJwt, VerifyAdmin, async (req, res) => {
             const id = req.params.id;
             const restock = req.body;
             const filter = { _id: new ObjectId(id) };
@@ -250,7 +271,7 @@ async function run() {
 
 
         // Post a writers
-        app.post('/writers', async (req, res) => {
+        app.post('/writers', VerifyJwt, VerifyAdmin, async (req, res) => {
             const writer = req.body;
             const result = await writerCollections.insertOne(writer)
             res.send(result)
@@ -263,20 +284,20 @@ async function run() {
 
         // Cart Collection
 
-        app.post('/carts', async (req, res) => {
+        app.post('/carts', VerifyJwt, async (req, res) => {
             const item = req.body;
             const result = await cartCollections.insertOne(item)
             res.send(result)
         })
 
         // get all cart
-        app.get('/carts', async (req, res) => {
+        app.get('/carts', VerifyJwt, async (req, res) => {
             const result = await cartCollections.find().toArray()
             res.send(result)
         })
 
         // get cart by email
-        app.get('/carts/:email', async (req, res) => {
+        app.get('/carts/:email', VerifyJwt, async (req, res) => {
             const email = req.params.email;
             const filter = { userEmail: email };
             const result = await cartCollections.find(filter).toArray()
@@ -284,7 +305,7 @@ async function run() {
         });
 
         // delete a item from cart
-        app.delete('/carts/:id', async (req, res) => {
+        app.delete('/carts/:id', VerifyJwt, async (req, res) => {
             const id = req.params.id
             const filter = { _id: new ObjectId(id) }
             const result = await cartCollections.deleteOne(filter)
@@ -293,7 +314,7 @@ async function run() {
 
         // Payments ........................
 
-        app.post('/orders', async (req, res) => {
+        app.post('/orders', VerifyJwt, async (req, res) => {
             const initialOrder = req?.body;
             const items = initialOrder?.items;
             const client = initialOrder?.client;
@@ -376,7 +397,7 @@ async function run() {
 
 
 
-        app.post('/payment/success/:trans_id', async (req, res) => {
+        app.post('/payment/success/:trans_id', VerifyJwt, async (req, res) => {
             try {
                 const orderCreationDate = new Date();
 
@@ -465,12 +486,12 @@ async function run() {
 
         //Manage Orders............
 
-        app.get('/orders', async (req, res) => {
+        app.get('/orders', VerifyJwt, async (req, res) => {
             const result = await orderCollections.find().toArray();
             res.send(result);
         });
 
-        app.get('/orders/:email', async (req, res) => {
+        app.get('/orders/:email', VerifyJwt, async (req, res) => {
             const email = req.params.email
             const filter = {
                 'client.email': email
@@ -480,7 +501,7 @@ async function run() {
         });
 
         // Get orders by orderStatus
-        app.get('/orders/status/:status', async (req, res) => {
+        app.get('/orders/status/:status', VerifyJwt, VerifyAdmin, async (req, res) => {
             const status = req.params.status.toLowerCase();
             const filter = { $expr: { $eq: [{ $toLower: "$orderStatus" }, status] } };
             const result = await orderCollections.find(filter).toArray();
@@ -488,7 +509,7 @@ async function run() {
         });
 
         // Change order Status
-        app.patch('/orders/status/:id', async (req, res) => {
+        app.patch('/orders/status/:id', VerifyJwt, VerifyAdmin, async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) }
             const update = req.body
@@ -502,7 +523,7 @@ async function run() {
         })
 
         // Change order Status delivered
-        app.patch('/orders/setDelivered/:id', async (req, res) => {
+        app.patch('/orders/setDelivered/:id', VerifyJwt, VerifyAdmin, async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) }
             const update = req.body;
@@ -517,7 +538,7 @@ async function run() {
         })
 
         // get order by transactionId
-        app.get('/orders/transID/:transactionId', async (req, res) => {
+        app.get('/orders/transID/:transactionId', VerifyJwt, async (req, res) => {
             const transactionId = req.params.transactionId
             const filter = {
                 'transactionId': transactionId
@@ -533,7 +554,7 @@ async function run() {
         const { ObjectId } = require('mongodb');
 
         // POST endpoint to handle reviews
-        app.post('/reviews', async (req, res) => {
+        app.post('/reviews', VerifyJwt, async (req, res) => {
             const review = req.body;
             const result = await reviewCollections.insertOne(review);
             const orderId = review?.orderId;
@@ -571,7 +592,7 @@ async function run() {
         })
 
         // get reviews by Email
-        app.get('/reviews/:email', async (req, res) => {
+        app.get('/reviews/:email', VerifyJwt, async (req, res) => {
             const email = req.params.email;
             const filter = { userEmail: email }
             const result = await reviewCollections.find(filter).toArray()
@@ -587,7 +608,7 @@ async function run() {
         })
 
         // add blog
-        app.post('/blogs', async (req, res) => {
+        app.post('/blogs', VerifyJwt, async (req, res) => {
             const blog = req.body;
             result = await blogCollection.insertOne(blog);
             res.send(result)
@@ -599,8 +620,8 @@ async function run() {
             res.send(result)
         })
 
-        // Get blogs
-        app.get('/blogs/email/:email', async (req, res) => {
+        // Get blogs by email
+        app.get('/blogs/email/:email', VerifyJwt, async (req, res) => {
             const email = req.params.email
             const filter = {
                 authorEmail: email
@@ -618,7 +639,7 @@ async function run() {
         })
 
         // Edit a blog
-        app.put('/blogs/:id', async (req, res) => {
+        app.put('/blogs/:id', VerifyJwt, async (req, res) => {
             const id = req.params.id;
             const update = req.body;
             const filter = { _id: new ObjectId(id) };
@@ -631,7 +652,7 @@ async function run() {
 
         // Delete a Blog
 
-        app.delete('/blogs/:id', async (req, res) => {
+        app.delete('/blogs/:id', VerifyJwt, async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
             const result = await blogCollection.deleteOne(filter);
@@ -640,7 +661,7 @@ async function run() {
 
         // sells Reports
 
-        app.get('/sales-report', async (req, res) => {
+        app.get('/sales-report', VerifyJwt, VerifyAdmin, async (req, res) => {
             const { startDate, endDate } = req.query;
 
             // Convert the startDate and endDate strings to Date objects
