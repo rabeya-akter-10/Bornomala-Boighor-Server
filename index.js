@@ -60,6 +60,7 @@ async function run() {
         const orderCollections = client.db("BornomalaDB").collection("orders");
         const reviewCollections = client.db("BornomalaDB").collection("reviews");
         const blogCollection = client.db("BornomalaDB").collection("blogs");
+        const viewsIPCollection = client.db("BornomalaDB").collection("viewersIP");
 
 
         // JWT
@@ -133,6 +134,31 @@ async function run() {
             }
         });
 
+        // promote or demote as admin
+
+        app.patch('/users/role/:id', VerifyJwt, VerifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const { role } = req.body;
+
+            const filter = { _id: new ObjectId(id) };
+            const updateDoc = {
+                $set: { role: role },
+            };
+
+            try {
+                const result = await usersCollections.updateOne(filter, updateDoc);
+
+                if (result.modifiedCount > 0) {
+                    res.send({ success: true, message: "User role updated successfully" });
+                } else {
+                    res.send({ success: false, message: "User not found or role is already set" });
+                }
+            } catch (error) {
+                res.status(500).send({ success: false, message: "Error updating user role", error });
+            }
+        });
+
+
         // Get All Categories
         app.get('/categories', async (req, res) => {
             const result = await categoriesCollections.find().toArray()
@@ -194,6 +220,63 @@ async function run() {
             }
         });
 
+        // API to track and update view count
+
+        app.post('/book/view', async (req, res) => {
+            const { bookId } = req.body; // Extract book ID from request body
+            const { ipAddress } = req.body; // Get the user's IP address
+            console.log(req.body);
+
+            try {
+                const existingView = await viewsIPCollection.findOne({
+                    bookId: new ObjectId(bookId),
+                    ipAddress: ipAddress
+                });
+
+                if (!existingView) {
+                    await booksCollections.updateOne(
+                        { _id: new ObjectId(bookId) },
+                        { $inc: { viewCount: 1 } }
+                    );
+
+
+                    await viewsIPCollection.insertOne({
+                        bookId: new ObjectId(bookId),
+                        ipAddress: ipAddress,
+                        viewedAt: new Date().toString()
+                    });
+                }
+
+                const updatedBook = await booksCollections.findOne({ _id: new ObjectId(bookId) });
+                res.json({ viewCount: updatedBook.viewCount });
+
+            } catch (error) {
+                console.error('Error tracking views:', error);
+                res.status(500).send({ message: 'Error tracking views', error });
+            }
+        });
+
+
+
+
+        app.get('/book/view', async (req, res) => {
+            const result = await viewsIPCollection.find().toArray()
+            res.send(result)
+        });
+
+
+        // Get most viewed books
+        app.get('/most-viewed', async (req, res) => {
+            try {
+                const books = await booksCollections.find().toArray();
+                const mostViewed = books.sort((a, b) => b.viewCount - a.viewCount);
+                const sliced = mostViewed.slice(0, 12);
+                res.send(sliced);
+            } catch (error) {
+                console.error('Error fetching most viewed books:', error);
+                res.status(500).send({ message: 'Error fetching most viewed books', error });
+            }
+        });
 
 
         // Get a book by id
