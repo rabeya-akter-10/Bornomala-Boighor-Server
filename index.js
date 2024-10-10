@@ -223,8 +223,7 @@ async function run() {
         // API to track and update view count
 
         app.post('/book/view', async (req, res) => {
-            const { bookId } = req.body; // Extract book ID from request body
-            const { ipAddress } = req.body; // Get the user's IP address
+            const { bookId, bookName, ipAddress } = req.body;
             console.log(req.body);
 
             try {
@@ -242,8 +241,9 @@ async function run() {
 
                     await viewsIPCollection.insertOne({
                         bookId: new ObjectId(bookId),
-                        ipAddress: ipAddress,
-                        viewedAt: new Date().toString()
+                        ipAddress,
+                        viewedAt: new Date().toString(),
+                        bookName,
                     });
                 }
 
